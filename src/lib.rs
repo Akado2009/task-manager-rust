@@ -12,7 +12,7 @@ impl WorkManager {
         Self { threshold: trs }
     }
 
-    pub fn run_job<T: Send + Sync >(&self, input: &Vec<T>, f: fn(&T) -> T) -> Vec<T> {
+    pub fn run_job<T: Send + Sync>(&self, input: &'static Vec<T>, f: fn(&T) -> T) -> Vec<T> {
         if input.len() > self.threshold as usize {
             let mut guards: Vec<JoinHandle<Vec<T>>> = vec!();
             for chunk in input.chunks(self.threshold as usize) {
