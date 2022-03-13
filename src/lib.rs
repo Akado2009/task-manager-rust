@@ -1,7 +1,7 @@
 use rand::distributions::Uniform;
 use rand::Rng;
 use std::vec::Vec;
-use std::thread::{self, JoinHandle};
+use crossbeam;
 
 pub struct WorkManager {
     pub threshold: i32,
@@ -12,21 +12,19 @@ impl WorkManager {
         Self { threshold: trs }
     }
 
-    pub fn run_job<T: Send + Sync>(&self, input: &'static Vec<T>, f: fn(&T) -> T) -> Vec<T> {
+    pub fn run_job<T: Send + Sync>(&self, input: &[T], f: impl Fn(&T) -> T + Sync) -> Vec<T> {
         if input.len() > self.threshold as usize {
-            let mut guards: Vec<JoinHandle<Vec<T>>> = vec!();
-            for chunk in input.chunks(self.threshold as usize) {
-                let chunk = chunk.to_owned();
-                let g = thread::spawn(move || chunk.iter().map(|x| f(x)).collect());
-                guards.push(g);
-            };
-            let mut result: Vec<T> = Vec::with_capacity(input.len());
-            for g in guards {
-                result.extend(g.join().unwrap().into_iter());
-            }
-            result
+            crossbeam::scope(|scope| {
+                let mut guards = vec![];
+                for chunk in input.chunks(self.threshold as usize) {
+                    let g = scope.spawn(|_| chunk.iter().map(|x| f(x)).collect::<Vec<_>>());
+                    guards.push(g);
+                }
+                guards.into_iter().flat_map(|g| g.join().unwrap()).collect()
+            })
+            .unwrap()
         } else {
-            return input.iter().map(|x| f(x)).collect::<Vec<T>>();
+            input.iter().map(|x| f(x)).collect()
         }
     }
 }
@@ -58,14 +56,14 @@ mod tests {
     #[test]
     fn test_multiple() {
         let wm: WorkManager = WorkManager::new(TRS_TEST);
-        let values: Vec<u32> = rand::thread_rng()
+        let nvalues: Vec<u32> = rand::thread_rng()
             .sample_iter(&Uniform::from(0..20))
             .take(TRS_TEST as usize * 2)
             .collect();
 
         assert_eq!(
-            wm.run_job(&values, testing_function),
-            values
+            wm.run_job(&nvalues, testing_function),
+            nvalues
                 .iter()
                 .map(|x| testing_function(x))
                 .collect::<Vec<u32>>()
